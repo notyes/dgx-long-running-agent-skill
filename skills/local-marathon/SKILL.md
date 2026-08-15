@@ -5,72 +5,48 @@ description: Manual long-running mode for local LLM work. Use ONLY when the user
 
 # Local Marathon
 
-This skill is an explicit opt-in mode for long-running work on a local model, especially when generation is relatively slow (for example 10-15 tokens/s) and the model supports a large context window such as ~128K tokens.
+This skill is an explicit opt-in mode for long-running work on a local model, especially when generation is relatively slow and the model supports a large context window such as ~128K tokens.
 
 ## Activation Gate
 
 **Do not activate automatically.**
 
-Activate this skill only when the user's current request explicitly contains the command:
+Activate this skill only when the user's current request explicitly contains:
 
 ```text
 /local-marathon
 ```
 
-Examples that activate the skill:
+A long task, coding task, large repository, or high context usage is not sufficient by itself.
 
-```text
-/local-marathon fix all failing tests and keep going until the acceptance criteria pass
-```
-
-```text
-/local-marathon
-Analyze this repository, implement the requested feature, validate it, and continue until complete.
-```
-
-Examples that must NOT activate the skill:
-
-```text
-Fix all failing tests.
-```
-
-```text
-Work on this repository for a long time.
-```
-
-```text
-This task may need 100K context.
-```
-
-A long task, coding task, large repository, or high context usage is not sufficient by itself. The explicit `/local-marathon` command is required.
-
-Once activated, keep Local Marathon mode active for the current user-directed task until one of these occurs:
+Once activated, keep Local Marathon active for the current user-directed task until:
 
 - the task completes,
-- the user explicitly stops/cancels the task,
-- the user explicitly disables Local Marathon mode,
+- the user explicitly stops/cancels it,
+- the user explicitly disables Local Marathon,
 - progress is blocked by something that requires user input.
 
-A fresh context/session created as part of this skill should resume Local Marathon mode from `.agent-state/HANDOFF.md`; the user should not need to type the command again merely because the skill intentionally rotated context while continuing the same task.
+A deliberate fresh context/session inside the same task should resume Local Marathon from `.agent-state/HANDOFF.md`; the user should not need to type `/local-marathon` again merely because context was rotated.
 
-The core rule is:
+## Core Rule
 
 > Treat the model context window as a safety ceiling, not as persistent memory.
 
-Do not try to preserve the entire task history in one conversation. Preserve durable state outside the model and reconstruct only the context required for the next unit of work.
+Preserve durable state outside the model and reconstruct only the context needed for the current unit of work.
 
 ## Objectives
 
 1. Keep working context bounded while allowing enough room for serious coding tasks.
 2. Avoid expensive compaction near the model context limit.
 3. Preserve progress across fresh sessions.
-4. Separate workers so tool output and intermediate work do not pollute the coordinator context.
-5. Make every completed step recoverable after process failure, model restart, or context reset.
-6. Favor deterministic files, git state, test output, and structured checkpoints over conversational memory.
+4. Isolate noisy investigations and large tool output.
+5. Make completed work recoverable after process failure, model restart, or context reset.
+6. Use filesystem state, git state, tests, and structured checkpoints as durable truth.
+7. For coding changes, require an outsider-style scrutiny pass before completion.
 
 ## Recommended Context Budget
 
-For a model with ~128K maximum context, use these defaults unless runtime measurements show a better operating point:
+For a model with ~128K maximum context:
 
 - Normal working context: 40K-60K tokens.
 - Heavy coding / cross-file reasoning: 60K-80K tokens.
@@ -79,11 +55,9 @@ For a model with ~128K maximum context, use these defaults unless runtime measur
 - Avoid starting a new large work unit: 110K-120K tokens.
 - 128K: emergency safety ceiling only.
 
-These are operational ranges, not targets that must be filled. Use the smallest context that preserves enough code, tests, constraints, and state to reason correctly.
+These are operating ranges, not targets to fill. Use the smallest context that preserves enough code, tests, constraints, and state to reason correctly.
 
-For coding work, 60K-80K is intentionally allowed because a realistic session may need room for system/tool instructions, project rules, persistent state, several source files, tests/configuration, and enough free space for reasoning and tool output.
-
-Example budget for a heavy coding session:
+A representative heavy-coding allocation may look like:
 
 ```text
 system + tools        ~10K
@@ -96,13 +70,11 @@ working headroom      ~20K
 total                 ~80K
 ```
 
-Do not preload 80K just because it is available. Grow toward the heavy-coding range only when cross-file reasoning genuinely benefits from it.
-
-If exact token usage is unavailable, approximate growth from message size, large tool results, file reads, logs, and repeated source code.
+Do not preload 80K just because it is available.
 
 ## Persistent Workspace
 
-At the root of the working repository, maintain a directory named `.agent-state/`:
+At the root of the working repository, maintain:
 
 ```text
 .agent-state/
@@ -116,63 +88,73 @@ At the root of the working repository, maintain a directory named `.agent-state/
 └── checkpoints/
 ```
 
-Create it at the beginning of a Local Marathon task if it does not exist. Initialize files from this skill's `templates/` directory when useful.
+Initialize from this skill's `templates/` directory when useful.
 
 ### TASK.md
 
-Contains the stable user goal, explicit constraints, acceptance criteria, and things that must not be changed.
-
-Do not rewrite the original goal merely to make execution easier.
+Stable user goal, explicit constraints, acceptance criteria, and protected behavior/files/APIs.
 
 ### STATE.md
 
-Contains only the current durable state:
+Concise durable state only:
 
 - what is known
 - what is completed
 - what is currently broken
 - relevant files/components
 - current validation status
+- latest scrutiny verdict when coding
 - next best action
-
-Keep this concise enough to load into every fresh session.
 
 ### TODO.md
 
-Contains actionable remaining work. Use states such as:
+Actionable remaining work:
 
 - `[ ]` pending
 - `[-]` in progress
 - `[x]` completed
 - `[!]` blocked
 
-Break large items into units that can normally finish inside one bounded context session.
-
 ### DECISIONS.md
 
-Record architectural decisions and non-obvious constraints that future workers must not rediscover or accidentally reverse.
-
-Each important decision should include:
-
-- decision
-- reason
-- affected paths/components
-- date or checkpoint identifier when useful
+Record architectural decisions and non-obvious constraints that future sessions should not rediscover or accidentally reverse.
 
 ### HANDOFF.md
 
-This is the minimum recovery packet for the next fresh session. It should answer:
+Minimum recovery packet for a fresh session. Include:
 
-- What is the overall goal?
-- What has already been done?
-- What is currently being attempted?
-- What should be done next?
-- Which files should be read first?
-- Which commands/tests should be run next?
-- What must not be repeated?
-- Is Local Marathon still active for this continuing task?
+- overall goal
+- completed work
+- current focus
+- files to read first
+- commands/tests to run next
+- what must not be repeated
+- whether Local Marathon remains active
+- latest scrutiny status if the current task changes code
 
-Keep HANDOFF.md smaller than STATE.md when possible.
+## Coding Review Policy
+
+Local Marathon integrates a scrutiny loop inspired by the outsider-review workflow in `thananon/9arm-skills`' `scrutinize` skill. The detailed procedure lives in:
+
+```text
+references/scrutiny-loop.md
+```
+
+The review has two stages:
+
+1. **Intent sanity check before meaningful implementation.** Briefly question whether the change is necessary, whether an existing mechanism already solves it, whether a smaller solution would work, and whether the change belongs at the correct layer.
+2. **Full scrutiny after implementation and relevant validation pass.** Trace the real code path end-to-end, verify claimed behavior and edge cases, inspect whether tests exercise the real path, and produce a verdict.
+
+The full scrutiny verdict must be one of:
+
+- `ship`
+- `fix-then-ship`
+- `rework`
+- `reject`
+
+For coding work, do not pass the Completion Gate unless the latest scrutiny verdict is `ship`, except when the user explicitly accepts a known unresolved finding.
+
+Prefer running the final full scrutiny in a fresh worker/subagent context when practical so the reviewer is less anchored to the implementation reasoning.
 
 ## Execution Loop
 
@@ -180,7 +162,7 @@ For every activated Local Marathon task, follow this loop.
 
 ### 1. Initialize
 
-Read:
+Read only what is needed to recover the task:
 
 1. user request / stable task definition
 2. `.agent-state/TASK.md`
@@ -189,144 +171,148 @@ Read:
 5. `.agent-state/DECISIONS.md`
 6. `.agent-state/HANDOFF.md` if resuming
 
-Do not immediately read the entire repository.
+Do not immediately ingest the entire repository.
 
 ### 2. Select one bounded work unit
 
-Choose the highest-value unblocked TODO item that can be completed without loading unrelated project history.
-
-A good unit has:
+Choose the highest-value unblocked TODO item with:
 
 - clear input files
 - clear expected outcome
 - a validation command or observable result
 - limited scope
 
-### 3. Load only relevant context
+### 3. Run intent sanity check for meaningful code changes
 
-Prefer targeted reads and searches over full-file or full-repository ingestion.
+Before implementing a new meaningful approach, briefly establish:
+
+- the goal in one sentence
+- why the change is needed
+- whether a smaller/existing solution is preferable
+- whether the chosen layer is appropriate
+
+Record a non-obvious approach decision in `DECISIONS.md`.
+
+Do not repeat this ceremony for every tiny edit when the same validated approach is continuing.
+
+### 4. Load only relevant context
+
+Prefer targeted reads/searches over whole-repository ingestion.
 
 Load, in order:
 
 1. stable task constraints
 2. concise state/handoff
 3. relevant source files
-4. directly relevant test/config files
-5. only the logs needed for the current failure
+4. directly relevant tests/configuration
+5. only logs needed for the current failure
 
-Avoid reloading old tool output when its durable conclusion already exists in STATE.md or findings files.
+For coding, several related implementation/test files may be loaded together when correctness depends on their interaction. Prefer one coherent dependency slice over unrelated files.
 
-For coding tasks, it is acceptable to load several related implementation and test files when the relationship between them is essential. Prefer one coherent dependency slice over many unrelated files.
+### 5. Execute
 
-### 4. Execute
-
-Perform the work for the selected unit.
+Perform the selected work unit.
 
 For code tasks:
 
 - inspect before editing
 - make the smallest coherent change
-- run the most relevant narrow validation first
-- expand validation only after narrow validation succeeds
+- run narrow validation first
+- expand validation after narrow validation succeeds
 
 Do not create speculative changes solely to keep the agent busy.
 
-### 5. Checkpoint immediately
+### 6. Checkpoint immediately
 
-After any meaningful progress, update durable state before continuing.
+Checkpoint after meaningful progress, including when:
 
-Checkpoint when any of these happens:
-
-- a bug root cause is identified
+- a root cause is identified
 - a file is changed
 - a test begins passing
 - a test exposes a new failure
 - an architectural decision is made
 - an external dependency blocks work
-- the current work unit completes
-- context enters the 80K-95K checkpoint zone
+- a work unit completes
+- context enters the 80K-95K zone
 
 Write conclusions, not raw conversation history.
 
-### 6. Decide whether to continue or reset
+### 7. Run full scrutiny for completed coding changes
 
-Continue in the same session when:
+After implementation and the relevant tests/validation pass, but before marking the coding unit complete:
 
-- the next work unit is tightly related
-- current code context remains useful
-- large tool outputs are not accumulating unnecessarily
-- context remains below the preferred fresh-session zone
+1. Restate intent.
+2. Ask once more whether a materially simpler solution is available.
+3. Use the diff as an entry point, then trace the real execution path through changed and unchanged code.
+4. Verify each important behavior claim against that path.
+5. Check relevant edge/error/retry/concurrency/contract/performance cases.
+6. Verify tests exercise the actual path rather than only mocked/intermediate state.
+7. Produce findings with evidence and a verdict.
 
-Once context reaches roughly 95K-110K, prefer writing HANDOFF.md and starting a fresh session unless finishing the current bounded unit is clearly cheaper than resetting.
+Follow `references/scrutiny-loop.md` for the detailed format.
 
-At 110K-120K, do not start another large investigation or broad code read. Preserve state and reset as soon as the current atomic step is safe.
+If verdict is `fix-then-ship` or `rework`:
+
+- add actionable findings to TODO.md
+- write detailed findings under `.agent-state/findings/`
+- update STATE.md with the verdict
+- return to the implementation loop
+- validate the fix
+- run full scrutiny again
+
+A `reject` verdict means stop the current implementation path, preserve the evidence/decision, and choose a new approach only if it remains within the user's goal.
+
+A `ship` verdict allows the coding unit to proceed toward completion.
+
+### 8. Decide whether to continue or reset
+
+Continue in the same session when the next unit is tightly related and the current context remains useful.
+
+At roughly 95K-110K, prefer writing HANDOFF.md and starting fresh unless finishing the current atomic unit is clearly cheaper.
+
+At 110K-120K, do not begin another broad investigation or large code read. Preserve state and reset as soon as the current atomic step is safe.
 
 ## Fresh-Session Protocol
 
-Before resetting context:
+Before resetting:
 
 1. Update STATE.md.
 2. Update TODO.md.
 3. Update DECISIONS.md if needed.
 4. Write HANDOFF.md.
-5. Record that `/local-marathon` remains active for this continuing task.
-6. Save useful raw output under `.agent-state/logs/` instead of embedding it into HANDOFF.md.
-7. Ensure all code changes are visible in git diff/status.
+5. Record that `/local-marathon` remains active for the continuing task.
+6. Record any pending or completed scrutiny verdict.
+7. Save useful raw output under `.agent-state/logs/`.
+8. Ensure code changes are visible in git status/diff.
 
-A new session should reconstruct state from files, not from a summary of the entire previous conversation.
-
-On resume, read HANDOFF.md first, then only the referenced state/source files. A deliberate context rotation within the same Local Marathon task does not require a second user invocation.
+On resume, read HANDOFF.md first, then only referenced state/source files.
 
 ## Context Isolation
 
-Use subagents/workers when a subtask would otherwise inject substantial tool output or unrelated source code into the coordinator context.
+Use subagents/workers when a subtask would otherwise inject substantial output or unrelated code into coordinator context.
 
-Good worker tasks:
+Good worker tasks include:
 
 - investigate one failing test
 - inspect one subsystem
 - trace one request flow
 - review one patch
-- research one dependency
-- analyze one log bundle
+- analyze logs
+- perform the final scrutiny pass
 
-Each worker receives only:
+Each worker receives only task-specific objective, relevant constraints, source paths, and expected output.
 
-1. task-specific objective
-2. relevant constraints
-3. relevant source paths
-4. expected output format
-
-Workers should return durable conclusions, not full transcripts.
-
-Store detailed findings in:
+Store detailed findings under:
 
 ```text
 .agent-state/findings/<topic>.md
 ```
 
-The coordinator should consume the concise conclusion and file path.
-
-## Coordinator Behavior
-
-The coordinator should be efficient in context and reasoning whenever possible.
-
-Its responsibilities are:
-
-- select the next work unit
-- delegate isolated investigations
-- merge conclusions
-- update durable state
-- decide when to checkpoint/reset
-- verify acceptance criteria
-
-The coordinator should not duplicate a worker's detailed investigation unless verification is required.
+Workers return durable conclusions, not full transcripts.
 
 ## Large Output Handling
 
-Never keep large, reproducible output in conversation context when it can be stored externally.
-
-Examples:
+Do not keep large reproducible output in conversational context when it can be stored externally, including:
 
 - build logs
 - stack traces
@@ -336,47 +322,37 @@ Examples:
 - generated diffs
 - benchmark output
 
-Store them under `.agent-state/logs/` and place only:
-
-- relevant error lines
-- conclusion
-- file path
-
-into working context.
+Keep only relevant lines, conclusion, and file path in working context.
 
 ## Compaction Policy
-
-Compaction is a fallback, not the primary memory strategy.
 
 Use this priority order:
 
 1. Drop irrelevant/reproducible tool output.
 2. Write large results to files.
 3. Isolate work in subagents.
-4. Summarize only durable conclusions.
+4. Summarize durable conclusions only.
 5. Fresh session + restore from `.agent-state/`.
-6. Use full conversational compaction only when a reset is impossible.
+6. Full conversational compaction only when reset is impossible.
 
-Never wait until the context is almost full before preserving state.
+Never wait until context is almost full before preserving state.
 
 ## Git as Durable State
 
-For code tasks, git is part of the memory system.
+For code tasks, git is part of the memory system:
 
-Use:
+- use `git status` for changed files
+- use `git diff` to reconstruct edits
+- use small commits/checkpoints when the user's workflow permits
+- use branches to isolate experiments
 
-- `git status` to identify changed files
-- `git diff` to reconstruct current edits
-- small commits/checkpoints when the user's workflow permits
-- branches to isolate experimental work
-
-Do not duplicate a large diff into STATE.md. Record why the change exists and point to the affected files.
+Do not copy a large diff into STATE.md. Record why the change exists and point to affected paths.
 
 ## vLLM Optimization Guidance
 
 When serving through vLLM, reuse stable prompt prefixes when possible so prefix caching can reduce repeated prefill work.
 
-Keep stable material ordered before volatile material where the client/framework allows it:
+Keep stable material before volatile material where the runtime permits:
 
 ```text
 system instructions
@@ -387,7 +363,7 @@ current work unit
 volatile tool output
 ```
 
-Prefix caching can improve prompt/prefill latency but does not solve slow decode throughput. The context-management architecture remains necessary even when prefix caching is enabled.
+Prefix caching can improve prompt/prefill latency but does not solve slow decode throughput.
 
 ## Failure Recovery
 
@@ -397,11 +373,10 @@ After crash/restart/model change:
 2. Read TASK.md.
 3. Read HANDOFF.md.
 4. Read STATE.md and TODO.md.
-5. Verify the last claimed validation result if important.
-6. Confirm from HANDOFF.md that Local Marathon was active for this same continuing task.
-7. Resume the next explicit action.
-
-Do not restart analysis from zero unless durable state is inconsistent or missing.
+5. Confirm Local Marathon was active for the same task.
+6. Restore pending scrutiny status.
+7. Verify important prior validation if needed.
+8. Resume the next explicit action.
 
 ## Completion Gate
 
@@ -411,24 +386,29 @@ Before completion:
 
 1. Re-read TASK.md acceptance criteria.
 2. Run final relevant validation.
-3. Confirm no `[!]` blockers remain unresolved.
-4. Summarize actual changes/results.
-5. Update STATE.md with final status.
-6. Mark HANDOFF.md as complete or remove stale next-action instructions.
+3. For code changes, confirm the latest full scrutiny verdict is `ship` or the user explicitly accepted the remaining finding.
+4. Confirm no `[!]` blockers remain unresolved.
+5. Confirm the real code path and tests support the claimed result.
+6. Summarize actual changes/results.
+7. Update STATE.md with final status.
+8. Mark HANDOFF.md complete or remove stale next-action instructions.
 
 ## Anti-Patterns
 
 Avoid:
 
-- auto-activating this skill without `/local-marathon`
-- using the entire 128K context merely because it exists
-- preloading 80K of material when a smaller dependency slice is enough
+- auto-activating without `/local-marathon`
+- using the whole 128K merely because it exists
+- preloading 80K when a smaller dependency slice is enough
 - repeatedly rereading the whole repository
 - storing raw logs in STATE.md
 - carrying worker transcripts into coordinator context
 - postponing checkpointing until context is nearly full
 - starting a large new work unit above ~110K
-- trusting conversation memory over filesystem/git state
+- reviewing only the diff without tracing surrounding code
+- treating passing tests as proof that the intended code path was exercised
+- rubber-stamping the agent's own implementation
+- trusting conversational memory over filesystem/git state
 - redoing investigations already captured in findings/DECISIONS.md
 - allowing multiple workers to modify the same files concurrently without coordination
 
@@ -436,4 +416,4 @@ Avoid:
 
 When unsure whether to keep working in the current context or start fresh:
 
-> Preserve state first. Use enough context to reason correctly, but prefer a fresh bounded context before historical context approaches the ceiling.
+> Preserve state first. Use enough context to reason correctly, and use a fresh outsider review before shipping code when practical.
