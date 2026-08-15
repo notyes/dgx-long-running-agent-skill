@@ -4,9 +4,25 @@ A multi-skill repository for reusable Agent Skills focused on long-running local
 
 ## Available skills
 
-### `dgx-long-running-agent`
+### `local-marathon`
 
-Keeps long-running autonomous work productive by using bounded working context, persistent filesystem checkpoints, fresh-session recovery, context isolation, and delegated workers.
+Manual long-running mode for local LLM work. It is intentionally **command-only** and must not auto-trigger.
+
+Activate it explicitly in the user request with:
+
+```text
+/local-marathon
+```
+
+Example:
+
+```text
+/local-marathon fix all failing tests and keep going until the acceptance criteria pass
+```
+
+A long task, coding task, large repository, or high context usage by itself must **not** activate this skill.
+
+Once `/local-marathon` is active for a user-directed task, the skill may deliberately rotate to a fresh context and resume from `.agent-state/HANDOFF.md` without requiring the user to type the command again for that same continuing task.
 
 For ~128K models, the recommended operating ranges are:
 
@@ -19,7 +35,7 @@ For ~128K models, the recommended operating ranges are:
 128K       safety ceiling only
 ```
 
-The 60K-80K range is intentionally available for serious coding tasks that need several related source files, tests, configuration, project rules, and reasoning headroom. These ranges are ceilings for each mode, not targets that must be filled.
+The 60K-80K range is intentionally available for serious coding tasks that need several related source files, tests, configuration, project rules, and reasoning headroom. These ranges are operating zones, not targets that must be filled.
 
 ## Install with `skills`
 
@@ -35,17 +51,17 @@ Install interactively and choose the skill(s):
 npx skills@latest add notyes/dgx-long-running-agent-skill
 ```
 
-Install one specific skill:
+Install Local Marathon directly:
 
 ```bash
-npx skills@latest add notyes/dgx-long-running-agent-skill --skill dgx-long-running-agent
+npx skills@latest add notyes/dgx-long-running-agent-skill --skill local-marathon
 ```
 
 Install globally for a specific supported agent, for example Codex:
 
 ```bash
 npx skills@latest add notyes/dgx-long-running-agent-skill \
-  --skill dgx-long-running-agent \
+  --skill local-marathon \
   -g -a codex -y
 ```
 
@@ -55,7 +71,7 @@ Each installable skill lives under `skills/<skill-name>/` and contains its own `
 
 ```text
 skills/
-└── dgx-long-running-agent/
+└── local-marathon/
     ├── SKILL.md
     ├── references/
     │   └── architecture.md
@@ -71,7 +87,7 @@ Additional skills can be added alongside it:
 
 ```text
 skills/
-├── dgx-long-running-agent/
+├── local-marathon/
 │   └── SKILL.md
 ├── another-skill/
 │   └── SKILL.md
