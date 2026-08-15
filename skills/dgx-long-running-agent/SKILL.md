@@ -15,7 +15,7 @@ Do not try to preserve the entire task history in one conversation. Preserve dur
 
 ## Objectives
 
-1. Keep normal working context small and bounded.
+1. Keep working context bounded while allowing enough room for serious coding tasks.
 2. Avoid expensive compaction near the model context limit.
 3. Preserve progress across fresh sessions.
 4. Separate workers so tool output and intermediate work do not pollute the coordinator context.
@@ -24,12 +24,33 @@ Do not try to preserve the entire task history in one conversation. Preserve dur
 
 ## Recommended Context Budget
 
-For a model with ~128K maximum context, use these defaults unless the runtime provides better token accounting:
+For a model with ~128K maximum context, use these defaults unless runtime measurements show a better operating point:
 
-- Target working context: 10K-30K tokens.
-- Soft checkpoint threshold: 30K-40K tokens.
-- Fresh-session threshold: 40K-60K tokens.
-- 128K: emergency ceiling only; do not intentionally work near it.
+- Normal working context: 40K-60K tokens.
+- Heavy coding / cross-file reasoning: 60K-80K tokens.
+- Aggressive checkpoint zone: 80K-95K tokens.
+- Prefer a fresh session: 95K-110K tokens.
+- Avoid starting a new large work unit: 110K-120K tokens.
+- 128K: emergency safety ceiling only.
+
+These are operational ranges, not targets that must be filled. Use the smallest context that preserves enough code, tests, constraints, and state to reason correctly.
+
+For coding work, 60K-80K is intentionally allowed because a realistic session may need room for system/tool instructions, project rules, persistent state, several source files, tests/configuration, and enough free space for reasoning and tool output.
+
+Example budget for a heavy coding session:
+
+```text
+system + tools        ~10K
+project rules          ~5K
+state / handoff        ~5K
+source code           ~30K
+tests / config        ~10K
+working headroom      ~20K
+--------------------------
+total                 ~80K
+```
+
+Do not preload 80K just because it is available. Grow toward the heavy-coding range only when cross-file reasoning genuinely benefits from it.
 
 If exact token usage is unavailable, approximate growth from message size, large tool results, file reads, logs, and repeated source code.
 
@@ -148,6 +169,8 @@ Load, in order:
 
 Avoid reloading old tool output when its durable conclusion already exists in STATE.md or findings files.
 
+For coding tasks, it is acceptable to load several related implementation and test files when the relationship between them is essential. Prefer one coherent dependency slice over many unrelated files.
+
 ### 4. Execute
 
 Perform the work for the selected unit.
@@ -174,20 +197,22 @@ Checkpoint when any of these happens:
 - an architectural decision is made
 - an external dependency blocks work
 - the current work unit completes
-- context is becoming large
+- context enters the 80K-95K checkpoint zone
 
 Write conclusions, not raw conversation history.
 
 ### 6. Decide whether to continue or reset
 
-Continue in the same session only if:
+Continue in the same session when:
 
 - the next work unit is tightly related
-- relevant context is still small
-- large tool outputs are not accumulating
-- context remains below the soft threshold
+- current code context remains useful
+- large tool outputs are not accumulating unnecessarily
+- context remains below the preferred fresh-session zone
 
-Otherwise write HANDOFF.md and start a fresh session.
+Once context reaches roughly 95K-110K, prefer writing HANDOFF.md and starting a fresh session unless finishing the current bounded unit is clearly cheaper than resetting.
+
+At 110K-120K, do not start another large investigation or broad code read. Preserve state and reset as soon as the current atomic step is safe.
 
 ## Fresh-Session Protocol
 
@@ -236,7 +261,7 @@ The coordinator should consume the concise conclusion and file path.
 
 ## Coordinator Behavior
 
-The coordinator should be cheap in context and reasoning whenever possible.
+The coordinator should be efficient in context and reasoning whenever possible.
 
 Its responsibilities are:
 
@@ -347,10 +372,12 @@ Before completion:
 Avoid:
 
 - using the entire 128K context merely because it exists
+- preloading 80K of material when a smaller dependency slice is enough
 - repeatedly rereading the whole repository
 - storing raw logs in STATE.md
 - carrying worker transcripts into coordinator context
 - postponing checkpointing until context is nearly full
+- starting a large new work unit above ~110K
 - trusting conversation memory over filesystem/git state
 - redoing investigations already captured in findings/DECISIONS.md
 - allowing multiple workers to modify the same files concurrently without coordination
@@ -359,4 +386,4 @@ Avoid:
 
 When unsure whether to keep working in the current context or start fresh:
 
-> Preserve state first. Prefer a fresh bounded context over a larger historical context.
+> Preserve state first. Use enough context to reason correctly, but prefer a fresh bounded context before historical context approaches the ceiling.
