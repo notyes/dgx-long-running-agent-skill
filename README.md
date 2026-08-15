@@ -8,7 +8,7 @@ A multi-skill repository for reusable Agent Skills focused on long-running local
 
 Manual long-running mode for local LLM work. It is intentionally **command-only** and must not auto-trigger.
 
-Activate it explicitly in the user request with:
+Activate it explicitly with:
 
 ```text
 /local-marathon
@@ -23,6 +23,30 @@ Example:
 A long task, coding task, large repository, or high context usage by itself must **not** activate this skill.
 
 Once `/local-marathon` is active for a user-directed task, the skill may deliberately rotate to a fresh context and resume from `.agent-state/HANDOFF.md` without requiring the user to type the command again for that same continuing task.
+
+## Coding flow
+
+Local Marathon now includes an outsider-style scrutiny loop for code changes:
+
+```text
+/local-marathon
+  -> intent sanity check
+  -> implement bounded work unit
+  -> tests / validation
+  -> full scrutiny pass
+       -> question whether a simpler approach exists
+       -> trace the actual code path end-to-end
+       -> verify behavior, edge cases, contracts, and tests
+       -> verdict: ship / fix-then-ship / rework / reject
+  -> fix/rework loops back to implementation
+  -> ship proceeds to completion gate
+```
+
+The final scrutiny pass should preferably run in a fresh worker/subagent context when practical to reduce confirmation bias from the implementation session.
+
+Passing tests alone is not considered sufficient evidence that a code task is complete; the final review should confirm that the real execution path produces the intended behavior and that tests exercise that path.
+
+Detailed review rules live in `skills/local-marathon/references/scrutiny-loop.md`.
 
 For ~128K models, the recommended operating ranges are:
 
@@ -67,14 +91,13 @@ npx skills@latest add notyes/dgx-long-running-agent-skill \
 
 ## Repository layout
 
-Each installable skill lives under `skills/<skill-name>/` and contains its own `SKILL.md`:
-
 ```text
 skills/
 └── local-marathon/
     ├── SKILL.md
     ├── references/
-    │   └── architecture.md
+    │   ├── architecture.md
+    │   └── scrutiny-loop.md
     └── templates/
         ├── TASK.md
         ├── STATE.md
@@ -83,19 +106,7 @@ skills/
         └── HANDOFF.md
 ```
 
-Additional skills can be added alongside it:
-
-```text
-skills/
-├── local-marathon/
-│   └── SKILL.md
-├── another-skill/
-│   └── SKILL.md
-└── another-skill-2/
-    └── SKILL.md
-```
-
-Then users can discover and selectively install them with `--list` and `--skill <name>`.
+Additional skills can be added alongside it and selectively installed with `--list` and `--skill <name>`.
 
 ## Design principle
 
