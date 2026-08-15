@@ -8,6 +8,19 @@ A multi-skill repository for reusable Agent Skills focused on long-running local
 
 Keeps long-running autonomous work productive by using bounded working context, persistent filesystem checkpoints, fresh-session recovery, context isolation, and delegated workers.
 
+For ~128K models, the recommended operating ranges are:
+
+```text
+40K-60K    normal working context
+60K-80K    heavy coding / cross-file reasoning
+80K-95K    checkpoint aggressively
+95K-110K   prefer a fresh session
+110K-120K  avoid starting new large work
+128K       safety ceiling only
+```
+
+The 60K-80K range is intentionally available for serious coding tasks that need several related source files, tests, configuration, project rules, and reasoning headroom. These ranges are ceilings for each mode, not targets that must be filled.
+
 ## Install with `skills`
 
 List all skills published by this repository:
@@ -72,4 +85,4 @@ Then users can discover and selectively install them with `--list` and `--skill 
 
 Do not use the model context window as long-term memory.
 
-Use a bounded working context, persist durable state outside the model, checkpoint continuously, isolate noisy subtasks, and reconstruct only the context required for the next unit of work.
+Use enough context to reason correctly about the current dependency slice, allow heavy coding sessions to grow into the 60K-80K range when justified, persist durable state outside the model, checkpoint before the context becomes expensive, isolate noisy subtasks, and reconstruct only the context required for the next unit of work.
